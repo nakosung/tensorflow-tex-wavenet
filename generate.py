@@ -16,9 +16,14 @@ LOGDIR = './logdir'
 WINDOW = 8000
 WAVENET_PARAMS = './wavenet_params.json'
 SAVE_EVERY = None
-
+TEMPERATURE = 1.0
 
 def get_arguments():
+    def _ensure_positive_float(f):
+        """Ensure argument is a positive float."""
+        if float(f) < 0:
+            raise argparse.ArgumentTypeError('Argument must be greater than zero')
+        return float(f)
     def _str_to_bool(s):
         """Convert string to bool (in argparse context)."""
         if s.lower() not in ['true', 'false']:
@@ -34,6 +39,11 @@ def get_arguments():
         type=int,
         default=SAMPLES,
         help='How many waveform samples to generate')
+    parser.add_argument(
+        '--temperature',
+        type=_ensure_positive_float,
+        default=TEMPERATURE,
+        help='Sampling temperature')
     parser.add_argument(
         '--logdir',
         type=str,
@@ -138,8 +148,18 @@ def main():
 
         # Run the WaveNet to predict the next sample.
         prediction = sess.run(outputs, feed_dict={samples: window})[0]
+
+        scaled_prediction = np.log(prediction) / args.temperature
+        scaled_prediction = scaled_prediction - np.logaddexp.reduce(scaled_prediction)
+        scaled_prediction = np.exp(scaled_prediction)
+        np.seterr(divide='warn')
+
+        # Prediction distribution at temperature=1.0 should be unchanged after scaling.
+        if args.temperature == 1.0:
+            np.testing.assert_allclose(prediction, scaled_prediction, atol=1e-5, err_msg='Prediction scaling at temperature=1.0 is not working as intended.')
+
         sample = np.random.choice(
-            np.arange(quantization_channels), p=prediction)
+            np.arange(quantization_channels), p=scaled_prediction)
         waveform.append(sample)
 
         # Show progress only once per second.
